@@ -8,14 +8,20 @@ import (
 	"time"
 )
 
+var weightBalanerRefreshInterval = 60 * time.Second
+
 type WeightedBalancer struct {
 	nodes      []string
 	weights    []int32
-	cumulative []int32 // 新增：用于二分查找
+	cumulative []int32
 	total      int32
 	manager    WeightFactorManagerIf
 	rand       *rand.Rand
-	mu         sync.RWMutex // 用 RWMutex 提升 Pick 并发性能
+	mu         sync.RWMutex
+
+	ticker *time.Ticker
+	stopCh chan struct{}
+	stopWg sync.WaitGroup
 }
 
 func NewWeightedBalancer(nodes []string, manager WeightFactorManagerIf) *WeightedBalancer {
@@ -44,10 +50,42 @@ func (wb *WeightedBalancer) updateWeights() {
 
 	wb.mu.Lock()
 	defer wb.mu.Unlock()
-
 	wb.weights = newWeights
 	wb.cumulative = newCumulative
 	wb.total = newTotal
+}
+
+func (wb *WeightedBalancer) StartAutoUpdate() {
+	if wb.ticker != nil {
+		return // already started
+	}
+
+	wb.ticker = time.NewTicker(weightBalanerRefreshInterval)
+	wb.stopCh = make(chan struct{})
+
+	wb.stopWg.Add(1)
+	go func() {
+		defer wb.stopWg.Done()
+		for {
+			select {
+			case <-wb.ticker.C:
+				wb.updateWeights()
+			case <-wb.stopCh:
+				return
+			}
+		}
+	}()
+}
+
+func (wb *WeightedBalancer) Stop() {
+	if wb.ticker == nil {
+		return
+	}
+	wb.ticker.Stop()
+	close(wb.stopCh)
+	wb.stopWg.Wait()
+	wb.ticker = nil
+	wb.stopCh = nil
 }
 
 func (wb *WeightedBalancer) Pick() (string, error) {
@@ -71,7 +109,7 @@ func (wb *WeightedBalancer) Pick() (string, error) {
 
 func (wb *WeightedBalancer) UpdateNodes(nodes []string) {
 	wb.mu.Lock()
-	defer wb.mu.Unlock()
 	wb.nodes = nodes
+	wb.mu.Unlock()
 	wb.updateWeights()
 }
