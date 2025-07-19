@@ -12,6 +12,11 @@ import (
 
 var ResolvingPeriod = 30 * time.Second
 
+func init() {
+	resolver.Register(NewBuilder())
+	log.Printf("xns resolver registered with scheme: %s", NewBuilder().Scheme())
+}
+
 func NewBuilder() resolver.Builder {
 	return &xnsBuilder{}
 }
