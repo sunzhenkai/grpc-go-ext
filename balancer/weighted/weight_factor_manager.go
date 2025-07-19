@@ -30,17 +30,17 @@ func newWeightFactorManager() *WeightFactorManager {
 	}
 }
 
-func (m *WeightFactorManager) GetAddressWeight(endpoint string) float64 {
+func (m *WeightFactorManager) GetAddressWeight(endpoint string) int32 {
 	if weight, ok := m.weights.Load(endpoint); ok {
-		return float64(weight.(int32))
+		return weight.(int32)
 	}
 
 	if weightFactor, err := fetchWeightFactor(m.client, endpoint); err == nil {
 		weight := int32(weightFactor * defaultWeight)
 		m.weights.Store(endpoint, weight)
-		return float64(weight)
+		return weight
 	} else {
-		return defaultWeight
+		return int32(defaultWeight)
 	}
 }
 
