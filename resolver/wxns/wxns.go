@@ -1,4 +1,4 @@
-package xns
+package wxns
 
 import (
 	"context"
@@ -14,27 +14,28 @@ var ResolvingPeriod = 30 * time.Second
 
 func init() {
 	resolver.Register(NewBuilder())
-	log.Printf("xns resolver registered with scheme: %s", NewBuilder().Scheme())
+	log.Printf("wxns resolver registered with scheme: %s", NewBuilder().Scheme())
 }
 
 func NewBuilder() resolver.Builder {
-	return &xnsBuilder{}
+	return &wxnsBuilder{}
 }
 
-type xnsBuilder struct{}
+type wxnsBuilder struct{}
 
-func (b *xnsBuilder) Scheme() string {
-	return "xns"
+func (b *wxnsBuilder) Scheme() string {
+	return "wxns"
 }
 
-func (b *xnsBuilder) Build(target resolver.Target, cc resolver.ClientConn, opts resolver.BuildOptions) (resolver.Resolver, error) {
-	dr, err := dns.NewBuilder().Build(target, cc, opts)
+func (b *wxnsBuilder) Build(target resolver.Target, cc resolver.ClientConn, opts resolver.BuildOptions) (resolver.Resolver, error) {
+	ncc := &weightedClientConnWrapper{cc: cc}
+	dr, err := dns.NewBuilder().Build(target, ncc, opts)
 	// dr, error := resolver.Get("dns").Build(target, cc, opts)
 	if err != nil {
 		return dr, err
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	d := &xnsResolver{
+	d := &wxnsResolver{
 		dnsResolver: dr,
 		ctx:         ctx,
 		cancel:      cancel,
@@ -44,14 +45,14 @@ func (b *xnsBuilder) Build(target resolver.Target, cc resolver.ClientConn, opts 
 	return d, nil
 }
 
-type xnsResolver struct {
+type wxnsResolver struct {
 	dnsResolver resolver.Resolver
 	ctx         context.Context
 	cancel      context.CancelFunc
 	wg          sync.WaitGroup
 }
 
-func (b *xnsResolver) refresh() {
+func (b *wxnsResolver) refresh() {
 	defer b.wg.Done()
 	ticker := time.NewTicker(ResolvingPeriod)
 	defer ticker.Stop()
@@ -59,20 +60,20 @@ func (b *xnsResolver) refresh() {
 	for {
 		select {
 		case <-b.ctx.Done():
-			log.Println("xnsResolver: refresh stopped due to context cancel")
+			log.Println("wxnsResolver: refresh stopped due to context cancel")
 			return
 		case <-ticker.C:
-			log.Println("xnsResolver: periodic refresh triggered")
+			log.Println("wxnsResolver: periodic refresh triggered")
 			b.dnsResolver.ResolveNow(resolver.ResolveNowOptions{})
 		}
 	}
 }
 
-func (b *xnsResolver) ResolveNow(opts resolver.ResolveNowOptions) {
+func (b *wxnsResolver) ResolveNow(opts resolver.ResolveNowOptions) {
 	b.dnsResolver.ResolveNow(opts)
 }
 
-func (d *xnsResolver) Close() {
+func (d *wxnsResolver) Close() {
 	d.cancel()
 	d.wg.Wait()
 	d.dnsResolver.Close()
