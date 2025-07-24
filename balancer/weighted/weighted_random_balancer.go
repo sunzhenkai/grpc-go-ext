@@ -1,7 +1,9 @@
 package weighted
 
 import (
+	"context"
 	"fmt"
+	"sync"
 
 	"google.golang.org/grpc/balancer"
 	"google.golang.org/grpc/balancer/base"
@@ -19,9 +21,20 @@ func init() {
 	))
 }
 
-type pickerBuilder struct{}
+type pickerBuilder struct {
+	mu         sync.Mutex
+	prevCancel context.CancelFunc
+}
 
 func (b *pickerBuilder) Build(info base.PickerBuildInfo) balancer.Picker {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	if b.prevCancel != nil {
+		b.prevCancel()
+		b.prevCancel = nil
+	}
+
 	nodes := make([]string, 0, len(info.ReadySCs))
 	scToAddr := make(map[string]balancer.SubConn)
 
@@ -32,19 +45,22 @@ func (b *pickerBuilder) Build(info base.PickerBuildInfo) balancer.Picker {
 	}
 
 	manager := GetWeightManager()
-	p := NewWeightedPicker(nodes, manager)
-	// FIXME: this will cause coroutine leak
-	// wb.StartAutoUpdate()
+	ctx, cancel := context.WithCancel(context.Background())
+	p := NewWeightedPicker(nodes, manager, ctx)
+	p.StartAutoUpdate()
+	b.prevCancel = cancel
 
 	return &weightedPicker{
 		picker:     p,
 		subConnMap: scToAddr,
+		cancel:     cancel,
 	}
 }
 
 type weightedPicker struct {
 	picker     *WeightedPicker
 	subConnMap map[string]balancer.SubConn
+	cancel     context.CancelFunc
 }
 
 func (p *weightedPicker) Pick(info balancer.PickInfo) (balancer.PickResult, error) {
@@ -57,4 +73,12 @@ func (p *weightedPicker) Pick(info balancer.PickInfo) (balancer.PickResult, erro
 		return balancer.PickResult{}, fmt.Errorf("subconn not found for addr: %s", addr)
 	}
 	return balancer.PickResult{SubConn: sc}, nil
+}
+
+func (p *weightedPicker) Close() {
+	if p.cancel != nil {
+		fmt.Printf("weightedPicker: Closing and stopping auto-update for its WeightedPicker.\n")
+		p.cancel()
+		p.cancel = nil
+	}
 }

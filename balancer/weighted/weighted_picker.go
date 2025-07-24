@@ -1,6 +1,7 @@
 package weighted
 
 import (
+	"context"
 	"fmt"
 	"math/rand"
 	"sort"
@@ -18,17 +19,19 @@ type WeightedPicker struct {
 	manager    WeightManagerIf
 	rand       *rand.Rand
 	mu         sync.RWMutex
+	ctx        context.Context
 
 	ticker *time.Ticker
 	stopCh chan struct{}
 	stopWg sync.WaitGroup
 }
 
-func NewWeightedPicker(nodes []string, manager WeightManagerIf) *WeightedPicker {
+func NewWeightedPicker(nodes []string, manager WeightManagerIf, ctx context.Context) *WeightedPicker {
 	wb := &WeightedPicker{
 		nodes:   nodes,
 		manager: manager,
 		rand:    rand.New(rand.NewSource(time.Now().UnixNano())),
+		ctx:     ctx,
 	}
 	wb.updateWeights()
 	return wb
@@ -71,6 +74,8 @@ func (wb *WeightedPicker) StartAutoUpdate() {
 			case <-wb.ticker.C:
 				wb.updateWeights()
 			case <-wb.stopCh:
+				return
+			case <-wb.ctx.Done():
 				return
 			}
 		}
