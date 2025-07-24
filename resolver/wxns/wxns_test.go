@@ -168,8 +168,8 @@ func TestNewBuilder(t *testing.T) {
 		response := &structpb.Struct{}
 
 		for range 1000 {
-			err := conn.Invoke(context.Background(), method, request, response)
-			log.Printf("invoke result: %v", err)
+			_ = conn.Invoke(context.Background(), method, request, response)
+			// log.Printf("invoke result: %v", err)
 		}
 	} else {
 		log.Printf("grpc dial failed. err=%v", err)
