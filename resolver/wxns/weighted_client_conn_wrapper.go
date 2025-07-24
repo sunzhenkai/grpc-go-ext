@@ -1,6 +1,8 @@
 package wxns
 
 import (
+	"log"
+
 	"google.golang.org/grpc/attributes"
 	"google.golang.org/grpc/resolver"
 	"google.golang.org/grpc/serviceconfig"
@@ -15,6 +17,7 @@ func (i *weightedClientConnWrapper) UpdateState(state resolver.State) error {
 	for _, addr := range state.Addresses {
 		hostPort := addr.Addr
 		weight := fetchWeight(hostPort)
+		log.Printf("weightedClientConnWrapper: update node info. weight=%v\n", weight)
 
 		newAttr := addr.Attributes
 		if newAttr == nil {
