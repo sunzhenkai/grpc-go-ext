@@ -3,6 +3,7 @@ module github.com/sunzhenkai/grpc-go-ext
 go 1.23.10
 
 require (
+	github.com/soheilhy/cmux v0.1.5
 	google.golang.org/grpc v1.73.0
 	google.golang.org/protobuf v1.36.6
 )

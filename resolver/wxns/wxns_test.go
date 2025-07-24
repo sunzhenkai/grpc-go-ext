@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/soheilhy/cmux"
 	"google.golang.org/grpc"
 	_ "google.golang.org/grpc/balancer/roundrobin"
 	_ "google.golang.org/grpc/balancer/weightedroundrobin"
@@ -74,54 +75,67 @@ type GrpcTestServer struct {
 	listener   net.Listener
 	httpServer *http.Server
 	wg         sync.WaitGroup
+	stopCh     chan struct{}
 }
 
 func NewGrpcTestServer(addr string) *GrpcTestServer {
 	return &GrpcTestServer{
-		addr: addr,
+		addr:   addr,
+		stopCh: make(chan struct{}),
 	}
 }
 
 func (s *GrpcTestServer) Start() error {
-	// 启动 grpc
+	// 监听 TCP 端口
 	lis, err := net.Listen("tcp", s.addr)
 	if err != nil {
 		return fmt.Errorf("failed to listen: %w", err)
 	}
 	s.listener = lis
-	s.grpcServer = grpc.NewServer()
 
+	// 用 cmux 做协议复用
+	m := cmux.New(lis)
+
+	// 匹配 gRPC 请求 (HTTP/2 with content-type "application/grpc")
+	grpcL := m.MatchWithWriters(cmux.HTTP2MatchHeaderFieldSendSettings("content-type", "application/grpc"))
+	// 匹配其他所有请求，做 HTTP 服务器
+	httpL := m.Match(cmux.Any())
+
+	// 初始化 grpc.Server
+	s.grpcServer = grpc.NewServer()
+	// TODO: 这里注册你的 grpc 服务
 	s.grpcServer.RegisterService(serviceDesc, nil)
 	reflection.Register(s.grpcServer)
 
-	s.wg.Add(1)
-	go func() {
-		defer s.wg.Done()
-		log.Printf("gRPC test server listening on %s", s.addr)
-		if err := s.grpcServer.Serve(lis); err != nil {
-			log.Printf("grpc server stopped: %v", err)
-		}
-	}()
-
-	// 启动 http 服务（单独监听一个端口，这里举例 8080）
+	// 初始化 http.Server
 	mux := http.NewServeMux()
 	mux.HandleFunc("/rpc/meta", s.handleMeta)
-
 	s.httpServer = &http.Server{
-		Addr:    ":8080",
 		Handler: mux,
 	}
 
+	// 启动 grpc 服务 goroutine
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
-		log.Println("HTTP server listening on :8080")
-		if err := s.httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Printf("http server stopped: %v", err)
+		log.Printf("gRPC server listening on %s", s.addr)
+		if err := s.grpcServer.Serve(grpcL); err != nil {
+			log.Printf("gRPC server stopped: %v", err)
 		}
 	}()
 
-	return nil
+	// 启动 http 服务 goroutine
+	s.wg.Add(1)
+	go func() {
+		defer s.wg.Done()
+		log.Printf("HTTP server listening on %s", s.addr)
+		if err := s.httpServer.Serve(httpL); err != nil && err != http.ErrServerClosed {
+			log.Printf("HTTP server stopped: %v", err)
+		}
+	}()
+
+	// 启动 cmux，阻塞直到关闭
+	return m.Serve()
 }
 
 func (s *GrpcTestServer) handleMeta(w http.ResponseWriter, r *http.Request) {
@@ -146,20 +160,31 @@ func (s *GrpcTestServer) Stop() {
 			log.Printf("http server shutdown error: %v", err)
 		}
 	}
-	s.wg.Wait()
 	if s.listener != nil {
 		s.listener.Close()
 	}
+	s.wg.Wait()
 }
 
 var serviceDesc = &grpc.ServiceDesc{
-	ServiceName: "test.TestService",
+	ServiceName: "rpc",
 	HandlerType: (*interface{})(nil),
 	Methods: []grpc.MethodDesc{
 		{
-			MethodName: "Test",
+			MethodName: "echo",
 			Handler: func(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-				return "hello from grpc-go server", nil
+				p, ok := peer.FromContext(ctx)
+				if ok {
+					log.Printf("local IP localAddr: %v\n", p.LocalAddr)
+					// log.Printf("client IP: %v", p.Addr)
+				} else {
+					log.Printf("local IP not found\n")
+					// log.Printf("localAddr: %v", p.LocalAddr)
+				}
+				resp := map[string]interface{}{
+					"weight": rand.Intn(40) + 80,
+				}
+				return json.Marshal(resp)
 			},
 		},
 	},
@@ -170,16 +195,18 @@ var serviceDesc = &grpc.ServiceDesc{
 func loggingUnaryInterceptor(
 	ctx context.Context,
 	method string,
-	req, reply any,
+	req, reply interface{},
 	cc *grpc.ClientConn,
 	invoker grpc.UnaryInvoker,
 	opts ...grpc.CallOption,
 ) error {
-	p, ok := peer.FromContext(ctx)
-	if ok {
-		fmt.Printf("Calling %s on server address: %v\n", method, p.Addr)
+	err := invoker(ctx, method, req, reply, cc, opts...)
+	if p, ok := peer.FromContext(ctx); ok {
+		log.Printf("invoked method=%s, remote addr=%v, err=%v\n", method, p.Addr, err)
+	} else {
+		log.Printf("invoked method=%s, remote addr unknown, err=%v\n", method, err)
 	}
-	return invoker(ctx, method, req, reply, cc, opts...)
+	return err
 }
 
 func TestNewBuilder(t *testing.T) {
@@ -199,18 +226,18 @@ func TestNewBuilder(t *testing.T) {
 	// test code
 	url := "wxns:///test.local:20010"
 	opts := []grpc.DialOption{
-		grpc.WithDefaultServiceConfig(`{"loadBalancingConfig": [{"weighted_target_experimental":{}}]}`),
+		// grpc.WithUnaryInterceptor(loggingUnaryInterceptor),
+		grpc.WithDefaultServiceConfig(`{"loadBalancingConfig": [{"weighted_round_robin":{}}]}`),
 		grpc.WithKeepaliveParams(keepalive.ClientParameters{
 			Time: 30 * time.Second,
 		}),
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
-		grpc.WithUnaryInterceptor(loggingUnaryInterceptor),
 	}
 	if conn, err := grpc.Dial(url, opts...); err == nil {
 		conn.Connect()
 		log.Printf("grpc status: %v", conn.GetState().String())
 
-		method := "/echo.EchoService/Echo"
+		method := "/rpc/echo"
 		request := &structpb.Struct{
 			Fields: map[string]*structpb.Value{
 				"message": structpb.NewStringValue("Hello, World!"),
@@ -218,7 +245,8 @@ func TestNewBuilder(t *testing.T) {
 		}
 		response := &structpb.Struct{}
 
-		for range 1000 {
+		// time.Sleep(1 * time.Second)
+		for range 10 {
 			err := conn.Invoke(context.Background(), method, request, response)
 			log.Printf("invoke result: %v", err)
 		}
