@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/soheilhy/cmux"
 	"google.golang.org/grpc"
 	_ "google.golang.org/grpc/balancer/roundrobin"
 	_ "google.golang.org/grpc/balancer/weightedroundrobin"
@@ -45,9 +46,9 @@ func (s *GrpcTestServer) Start() error {
 	}
 	s.listener = lis
 
-	// m := cmux.New(lis)
-	// grpcL := m.MatchWithWriters(cmux.HTTP2MatchHeaderFieldSendSettings("content-type", "application/grpc"))
-	// httpL := m.Match(cmux.Any())
+	m := cmux.New(lis)
+	grpcL := m.MatchWithWriters(cmux.HTTP2MatchHeaderFieldSendSettings("content-type", "application/grpc"))
+	httpL := m.Match(cmux.Any())
 
 	// 初始化 grpc.Server
 	s.grpcServer = grpc.NewServer()
@@ -56,34 +57,35 @@ func (s *GrpcTestServer) Start() error {
 	reflection.Register(s.grpcServer)
 
 	// 初始化 http.Server
-	// mux := http.NewServeMux()
-	// mux.HandleFunc("/rpc/meta", s.handleMeta)
-	// s.httpServer = &http.Server{
-	// 	Handler: mux,
-	// }
+	mux := http.NewServeMux()
+	mux.HandleFunc("/rpc/meta", s.handleMeta)
+	s.httpServer = &http.Server{
+		Handler: mux,
+	}
+	glis := grpcL
 
 	// 启动 grpc 服务 goroutine
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
 		log.Printf("gRPC server listening on %s", s.addr)
-		if err := s.grpcServer.Serve(lis); err != nil {
+		if err := s.grpcServer.Serve(glis); err != nil {
 			log.Printf("gRPC server stopped: %v", err)
 		}
 	}()
 
 	// 启动 http 服务 goroutine
-	// s.wg.Add(1)
-	// go func() {
-	// 	defer s.wg.Done()
-	// 	log.Printf("HTTP server listening on %s", s.addr)
-	// 	if err := s.httpServer.Serve(httpL); err != nil && err != http.ErrServerClosed {
-	// 		log.Printf("HTTP server stopped: %v", err)
-	// 	}
-	// }()
+	s.wg.Add(1)
+	go func() {
+		defer s.wg.Done()
+		log.Printf("HTTP server listening on %s", s.addr)
+		if err := s.httpServer.Serve(httpL); err != nil && err != http.ErrServerClosed {
+			log.Printf("HTTP server stopped: %v", err)
+		}
+	}()
 
 	// 启动 cmux，阻塞直到关闭
-	// return m.Serve()
+	go m.Serve()
 	return nil
 }
 
@@ -93,7 +95,7 @@ func (s *GrpcTestServer) handleMeta(w http.ResponseWriter, r *http.Request) {
 		"service": "grpc test server",
 		"version": "v1.0.0",
 		"time":    time.Now().Format(time.RFC3339),
-		"weight":  rand.Intn(40) + 80,
+		"weight":  rand.Intn(5),
 	}
 	_ = json.NewEncoder(w).Encode(resp)
 }
@@ -165,7 +167,7 @@ func TestNewBuilder(t *testing.T) {
 		}
 		response := &structpb.Struct{}
 
-		for range 10 {
+		for range 1000 {
 			err := conn.Invoke(context.Background(), method, request, response)
 			log.Printf("invoke result: %v", err)
 		}
