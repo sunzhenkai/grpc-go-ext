@@ -12,7 +12,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/soheilhy/cmux"
 	"google.golang.org/grpc"
 	_ "google.golang.org/grpc/balancer/roundrobin"
 	_ "google.golang.org/grpc/balancer/weightedroundrobin"
@@ -22,52 +21,6 @@ import (
 	"google.golang.org/grpc/reflection"
 	"google.golang.org/protobuf/types/known/structpb"
 )
-
-type MultiServer struct {
-	servers []*http.Server
-	wg      sync.WaitGroup
-}
-
-func NewMultiServer(ports []string, handler http.Handler) *MultiServer {
-	ms := &MultiServer{}
-	for _, port := range ports {
-		srv := &http.Server{
-			Addr:    ":" + port,
-			Handler: handler,
-		}
-		ms.servers = append(ms.servers, srv)
-	}
-	return ms
-}
-
-func (ms *MultiServer) Start() {
-	for _, srv := range ms.servers {
-		ms.wg.Add(1)
-		go func(s *http.Server) {
-			defer ms.wg.Done()
-			log.Printf("Listening on %s", s.Addr)
-			if err := s.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-				log.Printf("Server on %s exited with error: %v", s.Addr, err)
-			}
-		}(srv)
-	}
-}
-
-func (ms *MultiServer) Stop(ctx context.Context) error {
-	var wg sync.WaitGroup
-	for _, srv := range ms.servers {
-		wg.Add(1)
-		go func(s *http.Server) {
-			defer wg.Done()
-			log.Printf("Shutting down server on %s", s.Addr)
-			if err := s.Shutdown(ctx); err != nil {
-				log.Printf("Error shutting down server on %s: %v", s.Addr, err)
-			}
-		}(srv)
-	}
-	wg.Wait()
-	return nil
-}
 
 type GrpcTestServer struct {
 	addr       string
@@ -86,20 +39,15 @@ func NewGrpcTestServer(addr string) *GrpcTestServer {
 }
 
 func (s *GrpcTestServer) Start() error {
-	// 监听 TCP 端口
 	lis, err := net.Listen("tcp", s.addr)
 	if err != nil {
 		return fmt.Errorf("failed to listen: %w", err)
 	}
 	s.listener = lis
 
-	// 用 cmux 做协议复用
-	m := cmux.New(lis)
-
-	// 匹配 gRPC 请求 (HTTP/2 with content-type "application/grpc")
-	grpcL := m.MatchWithWriters(cmux.HTTP2MatchHeaderFieldSendSettings("content-type", "application/grpc"))
-	// 匹配其他所有请求，做 HTTP 服务器
-	httpL := m.Match(cmux.Any())
+	// m := cmux.New(lis)
+	// grpcL := m.MatchWithWriters(cmux.HTTP2MatchHeaderFieldSendSettings("content-type", "application/grpc"))
+	// httpL := m.Match(cmux.Any())
 
 	// 初始化 grpc.Server
 	s.grpcServer = grpc.NewServer()
@@ -108,34 +56,35 @@ func (s *GrpcTestServer) Start() error {
 	reflection.Register(s.grpcServer)
 
 	// 初始化 http.Server
-	mux := http.NewServeMux()
-	mux.HandleFunc("/rpc/meta", s.handleMeta)
-	s.httpServer = &http.Server{
-		Handler: mux,
-	}
+	// mux := http.NewServeMux()
+	// mux.HandleFunc("/rpc/meta", s.handleMeta)
+	// s.httpServer = &http.Server{
+	// 	Handler: mux,
+	// }
 
 	// 启动 grpc 服务 goroutine
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
 		log.Printf("gRPC server listening on %s", s.addr)
-		if err := s.grpcServer.Serve(grpcL); err != nil {
+		if err := s.grpcServer.Serve(lis); err != nil {
 			log.Printf("gRPC server stopped: %v", err)
 		}
 	}()
 
 	// 启动 http 服务 goroutine
-	s.wg.Add(1)
-	go func() {
-		defer s.wg.Done()
-		log.Printf("HTTP server listening on %s", s.addr)
-		if err := s.httpServer.Serve(httpL); err != nil && err != http.ErrServerClosed {
-			log.Printf("HTTP server stopped: %v", err)
-		}
-	}()
+	// s.wg.Add(1)
+	// go func() {
+	// 	defer s.wg.Done()
+	// 	log.Printf("HTTP server listening on %s", s.addr)
+	// 	if err := s.httpServer.Serve(httpL); err != nil && err != http.ErrServerClosed {
+	// 		log.Printf("HTTP server stopped: %v", err)
+	// 	}
+	// }()
 
 	// 启动 cmux，阻塞直到关闭
-	return m.Serve()
+	// return m.Serve()
+	return nil
 }
 
 func (s *GrpcTestServer) handleMeta(w http.ResponseWriter, r *http.Request) {
@@ -167,11 +116,11 @@ func (s *GrpcTestServer) Stop() {
 }
 
 var serviceDesc = &grpc.ServiceDesc{
-	ServiceName: "rpc",
+	ServiceName: "echo.EchoService",
 	HandlerType: (*interface{})(nil),
 	Methods: []grpc.MethodDesc{
 		{
-			MethodName: "echo",
+			MethodName: "Echo",
 			Handler: func(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 				p, ok := peer.FromContext(ctx)
 				if ok {
@@ -181,10 +130,7 @@ var serviceDesc = &grpc.ServiceDesc{
 					log.Printf("local IP not found\n")
 					// log.Printf("localAddr: %v", p.LocalAddr)
 				}
-				resp := map[string]interface{}{
-					"weight": rand.Intn(40) + 80,
-				}
-				return json.Marshal(resp)
+				return "hello from grpc-go server", nil
 			},
 		},
 	},
@@ -192,34 +138,8 @@ var serviceDesc = &grpc.ServiceDesc{
 	Metadata: "test",
 }
 
-func loggingUnaryInterceptor(
-	ctx context.Context,
-	method string,
-	req, reply interface{},
-	cc *grpc.ClientConn,
-	invoker grpc.UnaryInvoker,
-	opts ...grpc.CallOption,
-) error {
-	err := invoker(ctx, method, req, reply, cc, opts...)
-	if p, ok := peer.FromContext(ctx); ok {
-		log.Printf("invoked method=%s, remote addr=%v, err=%v\n", method, p.Addr, err)
-	} else {
-		log.Printf("invoked method=%s, remote addr unknown, err=%v\n", method, err)
-	}
-	return err
-}
-
 func TestNewBuilder(t *testing.T) {
 	// run server
-	// handler := http.NewServeMux()
-	// handler.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-	// 	log.Printf("%v\n", r.Host)
-	// 	_, _ = w.Write([]byte("{\"weight\":90}"))
-	// })
-	// ports := []string{"20010"}
-	// ms := NewMultiServer(ports, handler)
-	// ms.Start()
-
 	srv := NewGrpcTestServer(":20010")
 	_ = srv.Start()
 
@@ -237,7 +157,7 @@ func TestNewBuilder(t *testing.T) {
 		conn.Connect()
 		log.Printf("grpc status: %v", conn.GetState().String())
 
-		method := "/rpc/echo"
+		method := "/echo.EchoService/Echo"
 		request := &structpb.Struct{
 			Fields: map[string]*structpb.Value{
 				"message": structpb.NewStringValue("Hello, World!"),
@@ -245,7 +165,6 @@ func TestNewBuilder(t *testing.T) {
 		}
 		response := &structpb.Struct{}
 
-		// time.Sleep(1 * time.Second)
 		for range 10 {
 			err := conn.Invoke(context.Background(), method, request, response)
 			log.Printf("invoke result: %v", err)
@@ -255,8 +174,5 @@ func TestNewBuilder(t *testing.T) {
 	}
 
 	// close server
-	// ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	// defer cancel()
-	// _ = ms.Stop(ctx)
 	srv.Stop()
 }
