@@ -32,7 +32,7 @@ func (b *pickerBuilder) Build(info base.PickerBuildInfo) balancer.Picker {
 	}
 
 	manager := GetWeightManager()
-	p := NewWeightedBalancer(nodes, manager)
+	p := NewWeightedPicker(nodes, manager)
 	// FIXME: this will cause coroutine leak
 	// wb.StartAutoUpdate()
 

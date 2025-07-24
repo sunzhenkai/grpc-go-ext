@@ -24,7 +24,7 @@ type WeightedPicker struct {
 	stopWg sync.WaitGroup
 }
 
-func NewWeightedBalancer(nodes []string, manager WeightManagerIf) *WeightedPicker {
+func NewWeightedPicker(nodes []string, manager WeightManagerIf) *WeightedPicker {
 	wb := &WeightedPicker{
 		nodes:   nodes,
 		manager: manager,
