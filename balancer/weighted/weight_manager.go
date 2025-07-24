@@ -100,7 +100,7 @@ func (m *WeightManager) updateWeights() {
 func fetchWeight(client *http.Client, addr string) (int, error) {
 	resp, err := client.Get("http://" + addr + weightHTTPPath)
 	if err != nil {
-		return 1.0, err
+		return defaultWeight, err
 	}
 
 	body, err := io.ReadAll(resp.Body)
@@ -108,7 +108,7 @@ func fetchWeight(client *http.Client, addr string) (int, error) {
 		_ = resp.Body.Close()
 	}()
 	if err != nil {
-		return 1.0, err
+		return defaultWeight, err
 	}
 
 	var result struct {
@@ -116,7 +116,7 @@ func fetchWeight(client *http.Client, addr string) (int, error) {
 	}
 
 	if err := json.Unmarshal(body, &result); err != nil {
-		return 1.0, err
+		return defaultWeight, err
 	}
 
 	return result.Weight, nil

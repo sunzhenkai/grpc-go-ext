@@ -32,23 +32,23 @@ func (b *pickerBuilder) Build(info base.PickerBuildInfo) balancer.Picker {
 	}
 
 	manager := GetWeightManager()
-	wb := NewWeightedBalancer(nodes, manager)
+	p := NewWeightedBalancer(nodes, manager)
 	// FIXME: this will cause coroutine leak
 	// wb.StartAutoUpdate()
 
 	return &weightedPicker{
-		balancer:   wb,
+		picker:     p,
 		subConnMap: scToAddr,
 	}
 }
 
 type weightedPicker struct {
-	balancer   *WeightedBalancer
+	picker     *WeightedPicker
 	subConnMap map[string]balancer.SubConn
 }
 
 func (p *weightedPicker) Pick(info balancer.PickInfo) (balancer.PickResult, error) {
-	addr, err := p.balancer.Pick()
+	addr, err := p.picker.Pick()
 	if err != nil {
 		return balancer.PickResult{}, err
 	}

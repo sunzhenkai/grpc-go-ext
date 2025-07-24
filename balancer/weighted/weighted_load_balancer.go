@@ -10,7 +10,7 @@ import (
 
 var weightBalanerRefreshInterval = 60 * time.Second
 
-type WeightedBalancer struct {
+type WeightedPicker struct {
 	nodes      []string
 	weights    []int32
 	cumulative []int32
@@ -24,8 +24,8 @@ type WeightedBalancer struct {
 	stopWg sync.WaitGroup
 }
 
-func NewWeightedBalancer(nodes []string, manager WeightManagerIf) *WeightedBalancer {
-	wb := &WeightedBalancer{
+func NewWeightedBalancer(nodes []string, manager WeightManagerIf) *WeightedPicker {
+	wb := &WeightedPicker{
 		nodes:   nodes,
 		manager: manager,
 		rand:    rand.New(rand.NewSource(time.Now().UnixNano())),
@@ -34,7 +34,7 @@ func NewWeightedBalancer(nodes []string, manager WeightManagerIf) *WeightedBalan
 	return wb
 }
 
-func (wb *WeightedBalancer) updateWeights() {
+func (wb *WeightedPicker) updateWeights() {
 	n := len(wb.nodes)
 
 	newWeights := make([]int32, n)
@@ -55,7 +55,7 @@ func (wb *WeightedBalancer) updateWeights() {
 	wb.total = newTotal
 }
 
-func (wb *WeightedBalancer) StartAutoUpdate() {
+func (wb *WeightedPicker) StartAutoUpdate() {
 	if wb.ticker != nil {
 		return // already started
 	}
@@ -77,7 +77,7 @@ func (wb *WeightedBalancer) StartAutoUpdate() {
 	}()
 }
 
-func (wb *WeightedBalancer) Stop() {
+func (wb *WeightedPicker) Stop() {
 	if wb.ticker == nil {
 		return
 	}
@@ -88,7 +88,7 @@ func (wb *WeightedBalancer) Stop() {
 	wb.stopCh = nil
 }
 
-func (wb *WeightedBalancer) Pick() (string, error) {
+func (wb *WeightedPicker) Pick() (string, error) {
 	wb.mu.RLock()
 	defer wb.mu.RUnlock()
 
@@ -107,7 +107,7 @@ func (wb *WeightedBalancer) Pick() (string, error) {
 	return wb.nodes[randomIdx], nil
 }
 
-func (wb *WeightedBalancer) UpdateNodes(nodes []string) {
+func (wb *WeightedPicker) UpdateNodes(nodes []string) {
 	wb.mu.Lock()
 	wb.nodes = nodes
 	wb.mu.Unlock()
