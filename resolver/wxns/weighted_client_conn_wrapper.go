@@ -1,8 +1,6 @@
 package wxns
 
 import (
-	"log"
-
 	"google.golang.org/grpc/attributes"
 	"google.golang.org/grpc/resolver"
 	"google.golang.org/grpc/serviceconfig"
@@ -16,9 +14,9 @@ func (i *weightedClientConnWrapper) UpdateState(state resolver.State) error {
 	var newAddrs []resolver.Address
 	for _, addr := range state.Addresses {
 		hostPort := addr.Addr
-		weight := fetchWeight(hostPort)
-		log.Printf("weightedClientConnWrapper: update node info. weight=%v\n", weight)
+		weight := int64(fetchWeight(hostPort))
 
+		// 将 target 和 weight 都放到 Attributes 中
 		newAttr := addr.Attributes
 		if newAttr == nil {
 			newAttr = attributes.New("weight", weight)
@@ -29,12 +27,12 @@ func (i *weightedClientConnWrapper) UpdateState(state resolver.State) error {
 		newAddrs = append(newAddrs, resolver.Address{
 			Addr:               addr.Addr,
 			ServerName:         addr.ServerName,
-			Attributes:         newAttr,
+			Attributes:         newAttr, // 修改为包含 target 的 newAttr
 			BalancerAttributes: addr.BalancerAttributes,
 			Metadata:           addr.Metadata,
 		})
 	}
-	return i.cc.UpdateState(resolver.State{Addresses: newAddrs})
+	return i.cc.UpdateState(resolver.State{Addresses: newAddrs, Endpoints: state.Endpoints, ServiceConfig: state.ServiceConfig, Attributes: state.Attributes})
 }
 
 func (i *weightedClientConnWrapper) ReportError(err error) {

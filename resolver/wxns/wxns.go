@@ -29,8 +29,8 @@ func (b *wxnsBuilder) Scheme() string {
 
 func (b *wxnsBuilder) Build(target resolver.Target, cc resolver.ClientConn, opts resolver.BuildOptions) (resolver.Resolver, error) {
 	// target.URL.Scheme = "dns"
-	ncc := &weightedClientConnWrapper{cc: cc}
-	dr, err := dns.NewBuilder().Build(target, ncc, opts)
+	// ncc := &weightedClientConnWrapper{cc: cc}
+	dr, err := dns.NewBuilder().Build(target, cc, opts)
 	// dr, error := resolver.Get("dns").Build(target, ncc, opts)
 	if err != nil {
 		return dr, err

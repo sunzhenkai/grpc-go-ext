@@ -15,7 +15,7 @@ type WeightedBalancer struct {
 	weights    []int32
 	cumulative []int32
 	total      int32
-	manager    WeightFactorManagerIf
+	manager    WeightManagerIf
 	rand       *rand.Rand
 	mu         sync.RWMutex
 
@@ -24,7 +24,7 @@ type WeightedBalancer struct {
 	stopWg sync.WaitGroup
 }
 
-func NewWeightedBalancer(nodes []string, manager WeightFactorManagerIf) *WeightedBalancer {
+func NewWeightedBalancer(nodes []string, manager WeightManagerIf) *WeightedBalancer {
 	wb := &WeightedBalancer{
 		nodes:   nodes,
 		manager: manager,

@@ -1,42 +1,42 @@
 package weighted
 
 import (
+	"encoding/json"
 	"io"
 	"net/http"
-	"strconv"
 	"sync"
 	"time"
 )
 
 var (
-	globalWeightFactorManager *WeightFactorManager
-	once                      sync.Once
-	weightFactorHTTPPath      = "/rpc/weightfactor"
-	weightRefreshInterval     = 60 * time.Second
-	defaultWeight             = 1000.0
+	globalWeightManager   *WeightManager
+	once                  sync.Once
+	weightHTTPPath        = "/rpc/meta"
+	weightRefreshInterval = 60 * time.Second
+	defaultWeight         = 100
 )
 
-type WeightFactorManager struct {
+type WeightManager struct {
 	weights    sync.Map // map[string]int32
 	client     *http.Client
 	stopChan   chan struct{}
 	updateLock sync.Mutex
 }
 
-func newWeightFactorManager() *WeightFactorManager {
-	return &WeightFactorManager{
+func newWeightManager() *WeightManager {
+	return &WeightManager{
 		client:   &http.Client{Timeout: 1 * time.Second},
 		stopChan: make(chan struct{}),
 	}
 }
 
-func (m *WeightFactorManager) GetAddressWeight(endpoint string) int32 {
+func (m *WeightManager) GetAddressWeight(endpoint string) int32 {
 	if weight, ok := m.weights.Load(endpoint); ok {
 		return weight.(int32)
 	}
 
-	if weightFactor, err := fetchWeightFactor(m.client, endpoint); err == nil {
-		weight := int32(weightFactor * defaultWeight)
+	if weight, err := fetchWeight(m.client, endpoint); err == nil {
+		weight := int32(weight)
 		m.weights.Store(endpoint, weight)
 		return weight
 	} else {
@@ -44,7 +44,7 @@ func (m *WeightFactorManager) GetAddressWeight(endpoint string) int32 {
 	}
 }
 
-func (m *WeightFactorManager) RemoveAddress(addrs ...string) {
+func (m *WeightManager) RemoveAddress(addrs ...string) {
 	for _, addr := range addrs {
 		if _, ok := m.weights.Load(addr); ok {
 			m.weights.Delete(addr)
@@ -52,15 +52,15 @@ func (m *WeightFactorManager) RemoveAddress(addrs ...string) {
 	}
 }
 
-func (m *WeightFactorManager) start() {
+func (m *WeightManager) start() {
 	go m.refreshLoop()
 }
 
-func (m *WeightFactorManager) Stop() {
+func (m *WeightManager) Stop() {
 	close(m.stopChan)
 }
 
-func (m *WeightFactorManager) refreshLoop() {
+func (m *WeightManager) refreshLoop() {
 	ticker := time.NewTicker(weightRefreshInterval)
 	defer ticker.Stop()
 
@@ -74,7 +74,7 @@ func (m *WeightFactorManager) refreshLoop() {
 	}
 }
 
-func (m *WeightFactorManager) updateWeights() {
+func (m *WeightManager) updateWeights() {
 	m.updateLock.Lock()
 	defer m.updateLock.Unlock()
 
@@ -84,10 +84,10 @@ func (m *WeightFactorManager) updateWeights() {
 		wg.Add(1)
 		go func(addr string) {
 			defer wg.Done()
-			if weightFactor, err := fetchWeightFactor(m.client, addr); err != nil {
+			if weight, err := fetchWeight(m.client, addr); err != nil {
 				m.RemoveAddress(addr)
 			} else {
-				weight := int32(weightFactor * defaultWeight)
+				weight := int32(weight)
 				m.weights.Store(addr, weight)
 			}
 		}(key.(string))
@@ -97,8 +97,8 @@ func (m *WeightFactorManager) updateWeights() {
 	wg.Wait()
 }
 
-func fetchWeightFactor(client *http.Client, addr string) (float64, error) {
-	resp, err := client.Get("http://" + addr + weightFactorHTTPPath)
+func fetchWeight(client *http.Client, addr string) (int, error) {
+	resp, err := client.Get("http://" + addr + weightHTTPPath)
 	if err != nil {
 		return 1.0, err
 	}
@@ -111,17 +111,21 @@ func fetchWeightFactor(client *http.Client, addr string) (float64, error) {
 		return 1.0, err
 	}
 
-	if weight, err := strconv.ParseFloat(string(body), 64); err == nil && weight > 0 {
-		return weight, nil
-	} else {
+	var result struct {
+		Weight int `json:"weight"`
+	}
+
+	if err := json.Unmarshal(body, &result); err != nil {
 		return 1.0, err
 	}
+
+	return result.Weight, nil
 }
 
-func GetWeightManager() *WeightFactorManager {
+func GetWeightManager() *WeightManager {
 	once.Do(func() {
-		globalWeightFactorManager = newWeightFactorManager()
-		globalWeightFactorManager.start()
+		globalWeightManager = newWeightManager()
+		globalWeightManager.start()
 	})
-	return globalWeightFactorManager
+	return globalWeightManager
 }

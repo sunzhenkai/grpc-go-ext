@@ -13,9 +13,10 @@ import (
 	"time"
 
 	"github.com/soheilhy/cmux"
+	_ "github.com/sunzhenkai/grpc-go-ext/balancer/weighted"
 	"google.golang.org/grpc"
 	_ "google.golang.org/grpc/balancer/roundrobin"
-	_ "google.golang.org/grpc/balancer/weightedroundrobin"
+	_ "google.golang.org/grpc/balancer/weightedtarget"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/keepalive"
 	"google.golang.org/grpc/peer"
@@ -149,7 +150,11 @@ func TestNewBuilder(t *testing.T) {
 	url := "wxns:///test.local:20010"
 	opts := []grpc.DialOption{
 		// grpc.WithUnaryInterceptor(loggingUnaryInterceptor),
-		grpc.WithDefaultServiceConfig(`{"loadBalancingConfig": [{"weighted_round_robin":{}}]}`),
+		// srvCfg := `{"loadBalancingPolicy":"weighted_target_experimental","weightedTargetExperimental":{"childPolicy":[{"pick_first":{}}]}}`
+		// srvCfg := `{"loadBalancingConfig": [{"weighted_target_experimental":{}}]}`
+		// grpc.WithDefaultServiceConfig(`{"loadBalancingConfig": [{"weighted_target_experimental":{}}]}`),
+		// weighted.GetWeightManager()
+		grpc.WithDefaultServiceConfig(`{"loadBalancingConfig": [{"x_weighted_random":{}}]}`),
 		grpc.WithKeepaliveParams(keepalive.ClientParameters{
 			Time: 30 * time.Second,
 		}),
@@ -167,9 +172,10 @@ func TestNewBuilder(t *testing.T) {
 		}
 		response := &structpb.Struct{}
 
+		time.Sleep(1 * time.Second)
 		for range 1000 {
-			_ = conn.Invoke(context.Background(), method, request, response)
-			// log.Printf("invoke result: %v", err)
+			err := conn.Invoke(context.Background(), method, request, response)
+			log.Printf("invoke result: %v", err)
 		}
 	} else {
 		log.Printf("grpc dial failed. err=%v", err)

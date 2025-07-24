@@ -1,6 +1,6 @@
 package weighted
 
-type WeightFactorManagerIf interface {
+type WeightManagerIf interface {
 	GetAddressWeight(endpoint string) int32
 	RemoveAddress(addrs ...string)
 }
