@@ -3,6 +3,7 @@ package weighted
 import (
 	"context"
 	"fmt"
+	"log"
 	"math/rand"
 	"sort"
 	"sync"
@@ -80,6 +81,7 @@ func (wb *WeightedPicker) StartAutoUpdate() {
 			}
 		}
 	}()
+	log.Printf("WeightedPicker: quit auto update. [nodes=%v]", wb.nodes)
 }
 
 func (wb *WeightedPicker) Stop() {

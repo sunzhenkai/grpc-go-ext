@@ -3,6 +3,8 @@ package weighted
 import (
 	"context"
 	"fmt"
+	"log"
+	"sort"
 	"sync"
 
 	"google.golang.org/grpc/balancer"
@@ -43,6 +45,7 @@ func (b *pickerBuilder) Build(info base.PickerBuildInfo) balancer.Picker {
 		nodes = append(nodes, addrStr)
 		scToAddr[addrStr] = sc
 	}
+	sort.Strings(nodes)
 
 	manager := GetWeightManager()
 	ctx, cancel := context.WithCancel(context.Background())
@@ -50,6 +53,7 @@ func (b *pickerBuilder) Build(info base.PickerBuildInfo) balancer.Picker {
 	p.StartAutoUpdate()
 	b.prevCancel = cancel
 
+	log.Printf("create weighted picker. [ready_scs=%v, nodes=%v]", len(info.ReadySCs), nodes)
 	return &weightedPicker{
 		picker:     p,
 		subConnMap: scToAddr,

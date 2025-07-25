@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
-	"math/rand"
 	"net"
 	"net/http"
 	"sync"
@@ -96,7 +95,7 @@ func (s *GrpcTestServer) handleMeta(w http.ResponseWriter, r *http.Request) {
 		"service": "grpc test server",
 		"version": "v1.0.0",
 		"time":    time.Now().Format(time.RFC3339),
-		"weight":  rand.Intn(5),
+		"weight":  10, // rand.Intn(5),
 	}
 	_ = json.NewEncoder(w).Encode(resp)
 }
@@ -181,6 +180,7 @@ func TestNewBuilder(t *testing.T) {
 		log.Printf("grpc dial failed. err=%v", err)
 	}
 
+	time.Sleep(3 * time.Minute)
 	// close server
 	srv.Stop()
 }
