@@ -50,13 +50,12 @@ func (s *GrpcTestServer) Start() error {
 	grpcL := m.MatchWithWriters(cmux.HTTP2MatchHeaderFieldSendSettings("content-type", "application/grpc"))
 	httpL := m.Match(cmux.Any())
 
-	// 初始化 grpc.Server
+	// init grpc.Server
 	s.grpcServer = grpc.NewServer()
-	// TODO: 这里注册你的 grpc 服务
 	s.grpcServer.RegisterService(serviceDesc, nil)
 	reflection.Register(s.grpcServer)
 
-	// 初始化 http.Server
+	// init http.Server
 	mux := http.NewServeMux()
 	mux.HandleFunc("/rpc/meta", s.handleMeta)
 	s.httpServer = &http.Server{
@@ -64,7 +63,7 @@ func (s *GrpcTestServer) Start() error {
 	}
 	glis := grpcL
 
-	// 启动 grpc 服务 goroutine
+	// start grpc service goroutine
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
@@ -74,7 +73,7 @@ func (s *GrpcTestServer) Start() error {
 		}
 	}()
 
-	// 启动 http 服务 goroutine
+	// start http service goroutine
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
@@ -84,7 +83,7 @@ func (s *GrpcTestServer) Start() error {
 		}
 	}()
 
-	// 启动 cmux，阻塞直到关闭
+	// start cmux
 	go m.Serve()
 	return nil
 }
