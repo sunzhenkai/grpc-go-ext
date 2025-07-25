@@ -43,8 +43,8 @@ type wxnsResolver struct {
 func (b *wxnsBuilder) Build(target resolver.Target, cc resolver.ClientConn, opts resolver.BuildOptions) (resolver.Resolver, error) {
 	icc := &interceptingClientConn{
 		cc:       cc,
-		onUpdate: nil, // 先为 nil，下面再设定
-		resolver: nil, // 后面注入
+		onUpdate: nil,
+		resolver: nil,
 	}
 	dr, err := dns.NewBuilder().Build(target, icc, opts)
 	// dr, error := resolver.Get("dns").Build(target, ncc, opts)
