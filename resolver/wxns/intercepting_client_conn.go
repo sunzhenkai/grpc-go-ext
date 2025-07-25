@@ -30,3 +30,13 @@ func (i *interceptingClientConn) NewAddress(addrs []resolver.Address) {
 func (i *interceptingClientConn) ParseServiceConfig(config string) *serviceconfig.ParseResult {
 	return i.cc.ParseServiceConfig(config)
 }
+
+type legacyClientConn interface {
+	NewServiceConfig(string)
+}
+
+func (i *interceptingClientConn) NewServiceConfig(config string) {
+	if cc, ok := i.cc.(legacyClientConn); ok {
+		cc.NewServiceConfig(config)
+	}
+}
