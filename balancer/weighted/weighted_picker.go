@@ -21,10 +21,6 @@ type WeightedPicker struct {
 	rand       *rand.Rand
 	mu         sync.RWMutex
 	ctx        context.Context
-
-	ticker *time.Ticker
-	stopCh chan struct{}
-	stopWg sync.WaitGroup
 }
 
 func NewWeightedPicker(nodes []string, manager WeightManagerIf, ctx context.Context) *WeightedPicker {
@@ -57,42 +53,35 @@ func (wb *WeightedPicker) updateWeights() {
 	wb.weights = newWeights
 	wb.cumulative = newCumulative
 	wb.total = newTotal
+	log.Printf("WeightedPicker: Weights updated. Nodes: %v, Total Weight: %d", wb.nodes, wb.total)
 }
 
 func (wb *WeightedPicker) StartAutoUpdate() {
-	if wb.ticker != nil {
-		return // already started
+	select {
+	case <-wb.ctx.Done():
+		log.Printf("WeightedPicker: Context already cancelled, not starting auto update. [nodes=%v]", wb.nodes)
+		return
+	default:
 	}
 
-	wb.ticker = time.NewTicker(weightBalanerRefreshInterval)
-	wb.stopCh = make(chan struct{})
+	ticker := time.NewTicker(weightBalanerRefreshInterval)
+	defer ticker.Stop()
 
-	wb.stopWg.Add(1)
 	go func() {
-		defer wb.stopWg.Done()
 		for {
 			select {
-			case <-wb.ticker.C:
+			case <-ticker.C:
 				wb.updateWeights()
-			case <-wb.stopCh:
-				return
 			case <-wb.ctx.Done():
+				log.Printf("WeightedPicker: quit auto update (context quit). [nodes=%v]", wb.nodes)
 				return
 			}
 		}
 	}()
-	log.Printf("WeightedPicker: quit auto update. [nodes=%v]", wb.nodes)
 }
 
 func (wb *WeightedPicker) Stop() {
-	if wb.ticker == nil {
-		return
-	}
-	wb.ticker.Stop()
-	close(wb.stopCh)
-	wb.stopWg.Wait()
-	wb.ticker = nil
-	wb.stopCh = nil
+	log.Printf("WeightedPicker: Stop called. Auto update will stop when context is cancelled by caller.")
 }
 
 func (wb *WeightedPicker) Pick() (string, error) {
@@ -119,4 +108,5 @@ func (wb *WeightedPicker) UpdateNodes(nodes []string) {
 	wb.nodes = nodes
 	wb.mu.Unlock()
 	wb.updateWeights()
+	log.Printf("WeightedPicker: Nodes updated. Triggering async weight update. New nodes: %v", nodes)
 }
