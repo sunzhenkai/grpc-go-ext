@@ -12,7 +12,7 @@ var (
 	globalWeightManager   *WeightManager
 	once                  sync.Once
 	weightHTTPPath        = "/rpc/meta"
-	weightRefreshInterval = 60 * time.Second
+	weightRefreshInterval = 3 * time.Minute
 	defaultWeight         = 100
 )
 

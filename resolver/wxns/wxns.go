@@ -12,7 +12,7 @@ import (
 	"google.golang.org/grpc/resolver/dns"
 )
 
-var ResolvingPeriod = 5 * time.Second
+var ResolvingPeriod = 60 * time.Second
 
 func init() {
 	resolver.Register(NewBuilder())
