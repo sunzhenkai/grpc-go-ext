@@ -1,0 +1,185 @@
+package wxns
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"log"
+	"net"
+	"net/http"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/soheilhy/cmux"
+	_ "github.com/sunzhenkai/grpc-go-ext/balancer/weighted"
+	"google.golang.org/grpc"
+	_ "google.golang.org/grpc/balancer/roundrobin"
+	_ "google.golang.org/grpc/balancer/weightedtarget"
+	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/keepalive"
+	"google.golang.org/grpc/peer"
+	"google.golang.org/grpc/reflection"
+	"google.golang.org/protobuf/types/known/structpb"
+)
+
+type GrpcTestServer struct {
+	addr       string
+	grpcServer *grpc.Server
+	listener   net.Listener
+	httpServer *http.Server
+	wg         sync.WaitGroup
+	stopCh     chan struct{}
+}
+
+func NewGrpcTestServer(addr string) *GrpcTestServer {
+	return &GrpcTestServer{
+		addr:   addr,
+		stopCh: make(chan struct{}),
+	}
+}
+
+func (s *GrpcTestServer) Start() error {
+	lis, err := net.Listen("tcp", s.addr)
+	if err != nil {
+		return fmt.Errorf("failed to listen: %w", err)
+	}
+	s.listener = lis
+
+	m := cmux.New(lis)
+	grpcL := m.MatchWithWriters(cmux.HTTP2MatchHeaderFieldSendSettings("content-type", "application/grpc"))
+	httpL := m.Match(cmux.Any())
+
+	// init grpc.Server
+	s.grpcServer = grpc.NewServer()
+	s.grpcServer.RegisterService(serviceDesc, nil)
+	reflection.Register(s.grpcServer)
+
+	// init http.Server
+	mux := http.NewServeMux()
+	mux.HandleFunc("/rpc/meta", s.handleMeta)
+	s.httpServer = &http.Server{
+		Handler: mux,
+	}
+	glis := grpcL
+
+	// start grpc service goroutine
+	s.wg.Add(1)
+	go func() {
+		defer s.wg.Done()
+		log.Printf("gRPC server listening on %s", s.addr)
+		if err := s.grpcServer.Serve(glis); err != nil {
+			log.Printf("gRPC server stopped: %v", err)
+		}
+	}()
+
+	// start http service goroutine
+	s.wg.Add(1)
+	go func() {
+		defer s.wg.Done()
+		log.Printf("HTTP server listening on %s", s.addr)
+		if err := s.httpServer.Serve(httpL); err != nil && err != http.ErrServerClosed {
+			log.Printf("HTTP server stopped: %v", err)
+		}
+	}()
+
+	// start cmux
+	go m.Serve()
+	return nil
+}
+
+func (s *GrpcTestServer) handleMeta(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	resp := map[string]interface{}{
+		"service": "grpc test server",
+		"version": "v1.0.0",
+		"time":    time.Now().Format(time.RFC3339),
+		"weight":  10, // rand.Intn(5),
+	}
+	_ = json.NewEncoder(w).Encode(resp)
+}
+
+func (s *GrpcTestServer) Stop() {
+	if s.grpcServer != nil {
+		s.grpcServer.GracefulStop()
+	}
+	if s.httpServer != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := s.httpServer.Shutdown(ctx); err != nil {
+			log.Printf("http server shutdown error: %v", err)
+		}
+	}
+	if s.listener != nil {
+		s.listener.Close()
+	}
+	s.wg.Wait()
+}
+
+var serviceDesc = &grpc.ServiceDesc{
+	ServiceName: "echo.EchoService",
+	HandlerType: (*interface{})(nil),
+	Methods: []grpc.MethodDesc{
+		{
+			MethodName: "Echo",
+			Handler: func(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+				p, ok := peer.FromContext(ctx)
+				if ok {
+					log.Printf("local IP localAddr: %v\n", p.LocalAddr)
+					// log.Printf("client IP: %v", p.Addr)
+				} else {
+					log.Printf("local IP not found\n")
+					// log.Printf("localAddr: %v", p.LocalAddr)
+				}
+				return "hello from grpc-go server", nil
+			},
+		},
+	},
+	Streams:  []grpc.StreamDesc{},
+	Metadata: "test",
+}
+
+func TestNewBuilder(t *testing.T) {
+	// run server
+	srv := NewGrpcTestServer(":20010")
+	_ = srv.Start()
+
+	// test code
+	url := "wxns:///test.local:20010"
+	opts := []grpc.DialOption{
+		// grpc.WithUnaryInterceptor(loggingUnaryInterceptor),
+		// srvCfg := `{"loadBalancingPolicy":"weighted_target_experimental","weightedTargetExperimental":{"childPolicy":[{"pick_first":{}}]}}`
+		// srvCfg := `{"loadBalancingConfig": [{"weighted_target_experimental":{}}]}`
+		// grpc.WithDefaultServiceConfig(`{"loadBalancingConfig": [{"weighted_target_experimental":{}}]}`),
+		// weighted.GetWeightManager()
+		grpc.WithDefaultServiceConfig(`{"loadBalancingConfig": [{"x_weighted_random":{}}]}`),
+		grpc.WithKeepaliveParams(keepalive.ClientParameters{
+			Time: 30 * time.Second,
+		}),
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	}
+	if conn, err := grpc.Dial(url, opts...); err == nil {
+		conn.Connect()
+		log.Printf("grpc status: %v", conn.GetState().String())
+
+		method := "/echo.EchoService/Echo"
+		request := &structpb.Struct{
+			Fields: map[string]*structpb.Value{
+				"message": structpb.NewStringValue("Hello, World!"),
+			},
+		}
+		response := &structpb.Struct{}
+
+		time.Sleep(1 * time.Second)
+		for range 1000 {
+			err := conn.Invoke(context.Background(), method, request, response)
+			log.Printf("invoke result: %v", err)
+		}
+	} else {
+		log.Printf("grpc dial failed. err=%v", err)
+	}
+
+	time.Sleep(3 * time.Minute)
+	// close server
+	srv.Stop()
+}

@@ -53,7 +53,7 @@ type xnsResolver struct {
 
 func (b *xnsResolver) refresh() {
 	defer b.wg.Done()
-	ticker := time.NewTicker(30 * time.Second)
+	ticker := time.NewTicker(ResolvingPeriod)
 	defer ticker.Stop()
 
 	for {
